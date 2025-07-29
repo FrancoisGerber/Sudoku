@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sudoku</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 30px;
+      background-color: #121212;
+      color: #e0e0e0;
+    }
+
+    h1 {
+      margin-bottom: 15px;
+      color: #e0e0e0;
+      font-size: 48px;
+    }
+
+    #sudoku-container {
+      display: grid;
+      grid-template-columns: repeat(9, 60px);
+      grid-template-rows: repeat(9, 60px);
+      gap: 0;
+      background-color: #222;
+      padding: 0;
+      border-radius: 12px;
+      user-select: none;
+    }
+
+    .cell-container {
+      position: relative;
+      width: 60px;
+      height: 60px;
+      border: 1.5px solid #ffffff;
+      box-sizing: border-box;
+      background-color: #1e1e1e;
+      color: #e0e0e0;
+      font-weight: bold;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      outline: none;
+    }
+
+    .cell-container.given {
+      background-color: #444;
+      color: #bbb;
+      font-weight: bold;
+    }
+
+    input.sudoku-cell {
+      width: 100%;
+      height: 100%;
+      text-align: center;
+      font-size: 30px;
+      border: none;
+      background: transparent;
+      color: inherit;
+      font-weight: inherit;
+      outline: none;
+      -moz-appearance: textfield;
+      z-index: 2;
+      position: relative;
+    }
+
+    input.sudoku-cell::-webkit-outer-spin-button,
+    input.sudoku-cell::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    input.sudoku-cell:disabled {
+      background-color: transparent;
+      color: inherit;
+      font-weight: bold;
+    }
+
+    .pencil-marks {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      right: 3px;
+      bottom: 3px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      font-size: 12px;
+      color: #888;
+      pointer-events: none;
+      user-select: none;
+      z-index: 1;
+    }
+
+    .pencil-marks span {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* Bolder borders for 3x3 blocks */
+    /* Vertical block borders */
+    #sudoku-container>.cell-container:nth-child(3n) {
+      border-right: 5px solid #ffffff;
+    }
+
+    #sudoku-container>.cell-container:nth-child(3n+1) {
+      border-left: 5px solid #ffffff;
+    }
+
+    /* Horizontal block borders */
+    #sudoku-container>.cell-container:nth-child(n+19):nth-child(-n+27),
+    #sudoku-container>.cell-container:nth-child(n+46):nth-child(-n+54) {
+      border-bottom: 10px solid #ffffff;
+    }
+
+    #sudoku-container>.cell-container:nth-child(-n+9) {
+      border-top: 10px solid #ffffff;
+    }
+
+    /* Outer borders */
+    #sudoku-container>.cell-container:nth-child(9n+1) {
+      border-left: 5px solid #ffffff;
+    }
+
+    #sudoku-container>.cell-container:nth-child(n+73):nth-child(-n+81) {
+      border-bottom: 10px solid #ffffff;
+    }
+
+    #controls {
+      margin-top: 22px;
+      display: flex;
+      gap: 15px;
+    }
+
+    button {
+      padding: 12px 22px;
+      font-size: 24px;
+      cursor: pointer;
+      border-radius: 7.5px;
+      border: 1.5px solid #ffffff;
+      background-color: #333;
+      color: #e0e0e0;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #ffffff;
+    }
+
+    #message {
+      font-size: 24px;
+      margin-top: 22px;
+      font-weight: bold;
+      color: #4caf50;
+      min-height: 30px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Sudoku</h1>
+  <div id="difficulty-selector" style="margin-bottom: 15px;">
+    <label for="difficulty" style="font-size: 24px; margin-right: 12px;">Difficulty:</label>
+    <select id="difficulty" style="font-size: 24px; padding: 4.5px 12px;">
+      <option value="easy">Easy</option>
+      <option value="medium">Medium</option>
+      <option value="hard">Hard</option>
+    </select>
+  </div>
+  <div id="sudoku-container" aria-label="Sudoku grid" role="grid"></div>
+  <div id="controls">
+    <button id="new-puzzle-btn">New Puzzle</button>
+    <button id="check-btn">Check Solution</button>
+    <button id="clear-btn">Clear Progress</button>
+    <button id="toggle-pencil-btn" aria-pressed="false" title="Toggle Pencil Mode">Pencil Mode (.)</button>
+  </div>
+  <div id="message" role="alert" aria-live="polite"></div>
+
+  <script>
+    // Sudoku generator and solver adapted for easy puzzles
+    // We'll generate a full solved board, then remove some cells to create an easy puzzle
+
+    const sudokuContainer = document.getElementById('sudoku-container');
+    const newPuzzleBtn = document.getElementById('new-puzzle-btn');
+    const checkBtn = document.getElementById('check-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const togglePencilBtn = document.getElementById('toggle-pencil-btn');
+    const messageEl = document.getElementById('message');
+
+    // Store puzzle and solution in localStorage keys
+    const STORAGE_PUZZLE_KEY = 'sudoku-puzzle';
+    const STORAGE_SOLUTION_KEY = 'sudoku-solution';
+    const STORAGE_PROGRESS_KEY = 'sudoku-progress';
+
+    let pencilMode = false;
+
+    // Create 9x9 grid cells with input and pencil marks container
+    function createGrid() {
+      sudokuContainer.innerHTML = '';
+      for (let i = 0; i < 81; i++) {
+        const cellContainer = document.createElement('div');
+        cellContainer.classList.add('cell-container');
+        cellContainer.setAttribute('tabindex', '0');
+        cellContainer.setAttribute('aria-label', `Row ${Math.floor(i / 9) + 1} Column ${(i % 9) + 1}`);
+        cellContainer.dataset.index = i;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.maxLength = 1;
+        input.classList.add('sudoku-cell');
+        input.setAttribute('inputmode', 'numeric');
+        input.setAttribute('aria-label', `Number input for Row ${Math.floor(i / 9) + 1} Column ${(i % 9) + 1}`);
+        input.addEventListener('input', onCellInput);
+        input.addEventListener('keydown', onCellKeyDown);
+
+        const pencilMarks = document.createElement('div');
+        pencilMarks.classList.add('pencil-marks');
+
+        cellContainer.appendChild(input);
+        cellContainer.appendChild(pencilMarks);
+        sudokuContainer.appendChild(cellContainer);
+      }
+    }
+
+    // Validate input to allow only digits 1-9
+    function onCellInput(e) {
+      const input = e.target;
+      const val = input.value;
+      const cellContainer = input.parentElement;
+      if (!/^[1-9]$/.test(val)) {
+        input.value = '';
+      } else {
+        if (pencilMode) {
+          // In pencil mode, clear the main input and toggle pencil mark instead
+          input.value = '';
+          togglePencilMark(cellContainer, val);
+        } else {
+          // When a real number is entered, clear pencil marks
+          clearPencilMarks(cellContainer);
+          saveProgress();
+        }
+      }
+    }
+
+    // Allow navigation with arrow keys
+    function onCellKeyDown(e) {
+      const cellContainer = e.target.parentElement;
+      const index = parseInt(cellContainer.dataset.index);
+      let nextIndex;
+      switch (e.key) {
+        case 'ArrowUp':
+          nextIndex = index - 9;
+          break;
+        case 'ArrowDown':
+          nextIndex = index + 9;
+          break;
+        case 'ArrowLeft':
+          nextIndex = index - 1;
+          break;
+        case 'ArrowRight':
+          nextIndex = index + 1;
+          break;
+        default:
+          return;
+      }
+      if (nextIndex >= 0 && nextIndex < 81) {
+        sudokuContainer.children[nextIndex].querySelector('input').focus();
+        e.preventDefault();
+      }
+    }
+
+    // Generate a solved sudoku board using backtracking
+    function generateSolvedBoard() {
+      const board = Array(81).fill(0);
+
+      function isSafe(board, row, col, num) {
+        for (let x = 0; x < 9; x++) {
+          if (board[row * 9 + x] === num) return false;
+          if (board[x * 9 + col] === num) return false;
+        }
+        const startRow = Math.floor(row / 3) * 3;
+        const startCol = Math.floor(col / 3) * 3;
+        for (let r = 0; r < 3; r++) {
+          for (let c = 0; c < 3; c++) {
+            if (board[(startRow + r) * 9 + (startCol + c)] === num) return false;
+          }
+        }
+        return true;
+      }
+
+      function solve(board, pos = 0) {
+        if (pos === 81) return true;
+        if (board[pos] !== 0) return solve(board, pos + 1);
+
+        const row = Math.floor(pos / 9);
+        const col = pos % 9;
+        const numbers = shuffleArray([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        for (let num of numbers) {
+          if (isSafe(board, row, col, num)) {
+            board[pos] = num;
+            if (solve(board, pos + 1)) return true;
+            board[pos] = 0;
+          }
+        }
+        return false;
+      }
+
+      solve(board);
+      return board;
+    }
+
+    // Shuffle array helper
+    function shuffleArray(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // Remove cells to create a puzzle based on difficulty
+    function createPuzzleFromSolution(solution, difficulty) {
+      const puzzle = solution.slice();
+      let cellsToRemove;
+      if (difficulty === 'easy') {
+        cellsToRemove = 40;
+      } else if (difficulty === 'medium') {
+        cellsToRemove = 50;
+      } else if (difficulty === 'hard') {
+        cellsToRemove = 60;
+      } else {
+        cellsToRemove = 40; // fallback
+      }
+      let attempts = 0;
+      while (cellsToRemove > 0 && attempts < 500) {
+        const idx = Math.floor(Math.random() * 81);
+        if (puzzle[idx] !== 0) {
+          puzzle[idx] = 0;
+          cellsToRemove--;
+        }
+        attempts++;
+      }
+      return puzzle;
+    }
+
+    // Render puzzle on grid
+    function renderPuzzle(puzzle, solution) {
+      for (let i = 0; i < 81; i++) {
+        const cell = sudokuContainer.children[i];
+        const input = cell.querySelector('input');
+        if (puzzle[i] !== 0) {
+          input.value = puzzle[i];
+          input.disabled = true;
+          cell.classList.add('given');
+          clearPencilMarks(cell);
+        } else {
+          input.value = '';
+          input.disabled = false;
+          cell.classList.remove('given');
+          clearPencilMarks(cell);
+        }
+      }
+      saveProgress();
+    }
+
+    // Save puzzle, solution, and progress to localStorage
+    function savePuzzle(puzzle, solution) {
+      localStorage.setItem(STORAGE_PUZZLE_KEY, JSON.stringify(puzzle));
+      localStorage.setItem(STORAGE_SOLUTION_KEY, JSON.stringify(solution));
+    }
+
+    // Check if current user input matches solution
+    function checkSolution() {
+      const solutionStr = localStorage.getItem(STORAGE_SOLUTION_KEY);
+      if (!solutionStr) {
+        messageEl.textContent = 'No puzzle loaded.';
+        messageEl.style.color = 'red';
+        return false;
+      }
+      const solution = JSON.parse(solutionStr);
+      for (let i = 0; i < 81; i++) {
+        const cell = sudokuContainer.children[i];
+        const input = cell.querySelector('input');
+        if (parseInt(input.value) !== solution[i]) {
+          messageEl.textContent = 'There are mistakes or incomplete cells.';
+          messageEl.style.color = 'red';
+          return false;
+        }
+      }
+      messageEl.textContent = 'Congratulations! You solved the puzzle!';
+      messageEl.style.color = 'green';
+      return true;
+    }
+
+    // Clear progress (user inputs only)
+    function clearProgress() {
+      const puzzleStr = localStorage.getItem(STORAGE_PUZZLE_KEY);
+      if (!puzzleStr) return;
+      const puzzle = JSON.parse(puzzleStr);
+      for (let i = 0; i < 81; i++) {
+        const cell = sudokuContainer.children[i];
+        const input = cell.querySelector('input');
+        if (puzzle[i] === 0) {
+          input.value = '';
+          clearPencilMarks(cell);
+        }
+      }
+      localStorage.removeItem(STORAGE_PROGRESS_KEY);
+      localStorage.removeItem(STORAGE_PENCIL_KEY);
+      messageEl.textContent = '';
+      saveProgress();
+    }
+
+    // Initialize app
+    function init() {
+      createGrid();
+      // Set difficulty selector from localStorage if available
+      const difficultySelect = document.getElementById('difficulty');
+      const savedDifficulty = localStorage.getItem('sudoku-difficulty');
+      if (savedDifficulty && ['easy', 'medium', 'hard'].includes(savedDifficulty)) {
+        difficultySelect.value = savedDifficulty;
+      }
+      difficultySelect.addEventListener('change', () => {
+        localStorage.setItem('sudoku-difficulty', difficultySelect.value);
+        generateNewPuzzle();
+      });
+      const loaded = loadPuzzle();
+      if (!loaded) {
+        generateNewPuzzle();
+      }
+    }
+
+    // Generate new puzzle and save
+    function generateNewPuzzle() {
+      messageEl.textContent = '';
+      const difficulty = document.getElementById('difficulty').value;
+      localStorage.setItem('sudoku-difficulty', difficulty);
+      const solution = generateSolvedBoard();
+      const puzzle = createPuzzleFromSolution(solution, difficulty);
+      savePuzzle(puzzle, solution);
+      renderPuzzle(puzzle, solution);
+    }
+
+    newPuzzleBtn.addEventListener('click', () => {
+      generateNewPuzzle();
+    });
+
+    checkBtn.addEventListener('click', () => {
+      checkSolution();
+    });
+
+    clearBtn.addEventListener('click', () => {
+      clearProgress();
+    });
+
+    window.addEventListener('load', init);
+
+    // Toggle pencil mode button event
+    function handleTogglePencil() {
+      pencilMode = !pencilMode;
+      togglePencilBtn.setAttribute('aria-pressed', pencilMode.toString());
+      togglePencilBtn.style.backgroundColor = pencilMode ? '#4caf50' : '#333';
+    }
+    togglePencilBtn.addEventListener('click', handleTogglePencil);
+
+    // Allow toggling pencil mode with Period key
+    window.addEventListener('keydown', (e) => {
+      if (e.key === '.') {
+        e.preventDefault();
+        handleTogglePencil();
+      }
+    });
+
+    // Toggle pencil mark in a cell
+    function togglePencilMark(cellContainer, number) {
+      const pencilMarksDiv = cellContainer.querySelector('.pencil-marks');
+      let pencilMarks = getPencilMarks(cellContainer);
+      const num = parseInt(number);
+      if (pencilMarks.includes(num)) {
+        pencilMarks = pencilMarks.filter(n => n !== num);
+      } else {
+        pencilMarks.push(num);
+        pencilMarks.sort();
+      }
+      setPencilMarks(cellContainer, pencilMarks);
+    }
+
+    // Get pencil marks array from cell
+    function getPencilMarks(cellContainer) {
+      const marksStr = cellContainer.dataset.pencilMarks;
+      if (!marksStr) return [];
+      return marksStr.split(',').map(n => parseInt(n)).filter(n => !isNaN(n));
+    }
+
+    // Set pencil marks array to cell and update UI
+    function setPencilMarks(cellContainer, marks) {
+      cellContainer.dataset.pencilMarks = marks.join(',');
+      const pencilMarksDiv = cellContainer.querySelector('.pencil-marks');
+      pencilMarksDiv.innerHTML = '';
+      for (let i = 1; i <= 9; i++) {
+        const span = document.createElement('span');
+        if (marks.includes(i)) {
+          span.textContent = i;
+        } else {
+          span.textContent = '';
+        }
+        pencilMarksDiv.appendChild(span);
+      }
+    }
+
+    // Clear pencil marks from a cell
+    function clearPencilMarks(cellContainer) {
+      setPencilMarks(cellContainer, []);
+    }
+
+    // Update saveProgress to also save pencil marks
+    const STORAGE_PENCIL_KEY = 'sudoku-pencil-marks';
+
+    function saveProgress() {
+      const progress = [];
+      const pencilData = [];
+      for (let i = 0; i < 81; i++) {
+        const cell = sudokuContainer.children[i];
+        const input = cell.querySelector('input');
+        // Save empty string for empty cells instead of 0 to avoid confusion
+        progress[i] = input.value ? input.value : '';
+        pencilData[i] = cell.dataset.pencilMarks || '';
+      }
+      localStorage.setItem(STORAGE_PROGRESS_KEY, JSON.stringify(progress));
+      localStorage.setItem(STORAGE_PENCIL_KEY, JSON.stringify(pencilData));
+    }
+
+    // Update loadPuzzle to also load pencil marks
+    function loadPuzzle() {
+      const puzzleStr = localStorage.getItem(STORAGE_PUZZLE_KEY);
+      const solutionStr = localStorage.getItem(STORAGE_SOLUTION_KEY);
+      const progressStr = localStorage.getItem(STORAGE_PROGRESS_KEY);
+      const pencilStr = localStorage.getItem(STORAGE_PENCIL_KEY);
+      if (puzzleStr && solutionStr) {
+        const puzzle = JSON.parse(puzzleStr);
+        const solution = JSON.parse(solutionStr);
+        let progress = progressStr ? JSON.parse(progressStr) : null;
+        let pencilData = pencilStr ? JSON.parse(pencilStr) : null;
+        if (progress && progress.length === 81) {
+          for (let i = 0; i < 81; i++) {
+            const cell = sudokuContainer.children[i];
+            const input = cell.querySelector('input');
+            if (puzzle[i] !== 0) {
+              input.value = puzzle[i];
+              input.disabled = true;
+              cell.classList.add('given');
+              clearPencilMarks(cell);
+            } else {
+              input.value = progress[i] !== 0 ? progress[i] : '';
+              input.disabled = false;
+              cell.classList.remove('given');
+              if (input.value === '' && pencilData && pencilData[i]) {
+                cell.dataset.pencilMarks = pencilData[i];
+                setPencilMarks(cell, getPencilMarks(cell));
+              } else {
+                clearPencilMarks(cell);
+              }
+            }
+          }
+        } else {
+          renderPuzzle(puzzle, solution);
+        }
+        return { puzzle, solution };
+      }
+      return null;
+    }
+  </script>
+</body>
+
+</html>
